@@ -7,4 +7,107 @@ library(tidyverse)
 library(ggplot2)
 library(readxl)
 # uploading the dataset 
-fraud<-Fraud <- read_excel("~/Desktop/Credit Check /Fraud.xlsx")
+fraud<- read_excel("~/Desktop/Credit Check /Fraud.xlsx")
+colnames(fraud)
+head(fraud)
+print(head(fraud))
+dim(fraud) # diplay the dataset dimensions
+# checking the missing values in the dataset
+summary(fraud)
+print("Summary Statistics:")
+print(summary(fraud))
+print("Missing values per Column:")
+print(colSums(is.na(fraud)))
+print(" Class distribution(isFraud):")
+print(table(fraud$isFraud))
+#. There is no missing values in the dataset 
+# The class distribution is extremely imbalanced:only 535 out of 999,999.
+
+# Visulizing class imbalance and transaction types 
+fraud_counts<-table(fraud$isFraud)
+barplot(fraud_counts,names.arg=c("Legitimate","Fraudulent"),col=c("skyblue","red"),
+        main="Class Distribution:Legitimate vs Fraudulent Transaction",
+        ylab="Number of Transaction")
+# Visulizing Transaction Types 
+trans_type_counts<-table(fraud$type)
+barplot(trans_type_counts,col="lightgreen",
+        main="Distribution of Transaction Types",
+        ylab="Number of Transactons",las=2)
+# Visulizing transaction amount distribution (log scale for better Visibility)
+hist(log10(fraud$amount+1),breaks = 50,col="orange",
+     main = "Distribution of Transaction Amounts(log10 scale)",
+     xlab = "log10(Amout+1)")
+# preparing data:encode "type" as factor , remove identifiers 
+fraud_data_prep<-fraud%>% 
+  mutate(type=as.factor(type)) %>% 
+  select(-nameOrig,-nameDest)
+# converting isFraud to factor for classifications 
+df_model<-fraud_data_prep %>% 
+  mutate(isFraud=as.factor(isFraud))
+# show the head of the prepared data 
+table_head<-head(df_model)
+print(table_head)
+# sample the data balance classes for feature impotance analysis 
+set.seed(42)
+fraud_sample<-df_model %>% 
+  group_by(isFraud) %>% 
+  sample_n(size=min(2000,n()),replace = FALSE) %>% 
+  ungroup()
+# Train Random Forest for feature importance 
+install.packages("randoForest")
+library(randomForest)
+rf_model<-randomForest(isFraud~ .,data=fraud_sample,importance=TRUE,ntree=100)
+# get feature impotance 
+importance_df <- as.data.frame(importance(rf_model))
+importance_df$Feature <- rownames(importance_df)
+# explicitly converting MeanDecreaseGini to numeric before sorting :
+importance_df$MeanDecreaseGini <- as.numeric(importance_df$MeanDecreaseGini)
+importance_df <- importance_df[order(-importance_df$MeanDecreaseGini), ]
+
+importance_df<-importance_df[order(-importance_df$MeanDecreaseGini),]
+print(head(importance_df))
+colnames(importance_df)
+# show top 10 features 
+print(head(importance_df,10))
+
+# visualizing feature importance 
+ggplot(importance_df[1:8,],aes(x=reorder(Feature,MeanDecreaseGini),y=MeanDecreaseGini))+
+  geom_bar(stat = "Identity",fill="steelblue")+
+  coord_flip()+
+  labs(title = "Feature Importance for Fraud Detection (Rondom Forest)",
+       x="Feature",y="Mean Decrease Gini")+
+  theme_minimal()
+# calculate correlation matrix for numerical features 
+numerical_features<-df_model %>% 
+  select_if(is.numeric) %>% 
+  select(-isFlaggedFraud)# Remove this as it's highly correlated with target 
+car_matrix<-cor(numerical_features)
+print("Correlation matrix of numerical features:")
+print(round(car_matrix,3))
+
+# Building the predictive model 
+
+df_model<-df_model %>% 
+  mutate(
+    diffOrig=oldbalanceOrg-newbalanceOrig,
+    diffDest= newbalanceDest-oldbalanceDest,
+    amt_to_orig=ifelse(oldbalanceOrg>0,amount/oldbalanceOrg,0),
+    amt_to_dest=ifelse(oldbalanceDest>0,amount/oldbalanceDest,0),
+    zeroOrig=as.integer(oldbalanceOrg==0),
+    zeroDest=as.integer(oldbalanceDest==0)
+  )
+print(head(df_model[,c("diffOrig","diffDest","amt_to_orig","amt_to_dest","zeroOrig","zeroDest")]))
+# load the necessary package "caret"
+install.packages("caret")
+library(caret)
+# split into train and test sets 
+train_idx<-createDataPartition(fraud_sample$isFraud,p=0.7,list = FALSE)
+train_data<-fraud_sample[train_idx,]
+test_data<-fraud_sample[-train_idx,]
+# Train Rondom Forest model with new features 
+rf_model<-randomForest(isFraud~ . -isFlaggedFraud,data=train_data,importance=TRUE,ntree=100)
+# predicts on test sets 
+preds<-predict(rf_model,test_data,type = "response")
+# confusion matrix and accuracy
+conf_mat<-confusionMatrix(preds,test_data$isFraud)
+print(conf_mat)
