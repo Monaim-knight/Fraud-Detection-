@@ -1,0 +1,10 @@
+# Loading the required packages 
+install.packages("tidyverse")
+install.packages("readxl")
+install.packages("dplyr")
+install.packages("ggplot2")
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+# uploading the dataset 
+fraud<-Fraud <- read_excel("~/Desktop/Credit Check /Fraud.xlsx")
